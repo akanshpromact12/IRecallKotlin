@@ -20,6 +20,10 @@ public class AlbumDetails implements Comparable, Serializable {
     public String thumbnail;
     public String MediaType;
 
+    public AlbumDetails() {
+
+    }
+
     @JsonCreator
     public AlbumDetails(@JsonProperty("AlbumId") String AlbumId, @JsonProperty("Date") String Date,
                         @JsonProperty("Filename") String Filename, @JsonProperty("Latitude") String Latitude,
