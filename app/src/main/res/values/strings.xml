@@ -1,0 +1,42 @@
+<resources>
+    <string name="app_name">IRecall</string>
+
+    <string name="navigation_drawer_open">Open navigation drawer</string>
+    <string name="navigation_drawer_close">Close navigation drawer</string>
+    <string name="openDrawer">open_drawer</string>
+    <string name="closeDrawer">close_drawer</string>
+
+    <string name="nav_logout">Logout</string>
+
+    <!-- activity_main.xml -->
+    <string name="welcome_message">Recall all your sweet memories, in the form of a collection of the best of photos</string>
+    <string name="img_content_desc">Front Page Logo</string>
+
+
+    <!-- content_main.xml -->
+    <string name="welcome_msg_content">Welcome</string>
+    <string name="img_content_description">Main Image Captured from Camera/Gallery</string>
+    <string name="button_text">Upload Photo(s)</string>
+
+
+    <!-- home_main.xml -->
+    <string name="welcome_msg_home">Hello World!!!</string>
+
+    <!-- nav_header_main.xml -->
+    <string name="username_text">Android Studio</string>
+    <string name="email_text">android.studio@android.com</string>
+
+    <string name="hello_blank_fragment">Hello blank fragment</string>
+
+    <string name="imageDialogTitle">Upload image</string>
+    <string name="videoDialogTitle">Upload video</string>
+    <string name="galleryDialogTitle">Select image from gallery</string>
+    <string name="galleryVideoDialogTitle">Select video from gallery</string>
+
+    <string name="exit">Exit</string>
+    <string name="exitMsg">Do you really want to exit?</string>
+    <string name="loading">Please wait...</string>
+
+    <string name="share_string">Share</string>
+    <string name="fireImage">Image from Firebase Db</string>
+</resources>
