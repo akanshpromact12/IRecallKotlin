@@ -1,7 +1,12 @@
 package com.promact.akansh.irecall_kotlin
 
+import android.app.Activity
+import android.app.AlertDialog
+import android.app.Dialog
 import android.app.ProgressDialog
+import android.content.DialogInterface
 import android.content.Intent
+import android.graphics.Bitmap
 import android.location.Address
 import android.location.Geocoder
 import android.location.Location
@@ -14,11 +19,11 @@ import android.provider.MediaStore
 import android.support.design.widget.Snackbar
 import android.support.v4.content.FileProvider
 import android.util.Log
+import android.view.LayoutInflater
 import android.view.View
-import android.widget.ImageView
-import android.widget.RelativeLayout
-import android.widget.TextView
-import android.widget.Toast
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.widget.*
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.resource.drawable.GlideDrawable
 import com.bumptech.glide.request.RequestListener
@@ -35,14 +40,21 @@ import com.google.android.gms.maps.*
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.Marker
 import com.google.android.gms.maps.model.MarkerOptions
+import com.google.android.gms.tasks.OnFailureListener
+import com.google.android.gms.tasks.OnSuccessListener
 import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.StorageReference
+import com.google.firebase.storage.UploadTask
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
+import kotlin.collections.RandomAccess
 import kotlin.coroutines.experimental.EmptyCoroutineContext.plus
 
 class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.OnConnectionFailedListener, android.location.LocationListener {
@@ -87,7 +99,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
     lateinit var revMap: MutableMap<String, ArrayList<AlbumDetails>>
     lateinit var marker: Marker
     var childrenCount: Long = 0
-    val showLock: Boolean = false
+    var showLock: Boolean = false
     lateinit var firebaseAnalytics: FirebaseAnalytics
     lateinit var gps: GPSTracker
     lateinit var folderNameFirebase: String
@@ -414,7 +426,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         startActivityForResult(Intent.createChooser(intent, "Select Picture"), SELECT_PICTURE)
     }
 
-    fun openViewChooser() {
+    fun openVideoChooser() {
         var intent: Intent = Intent()
         intent.setType("video/*")
         var maxVideoSize: Long = 12 * 1024 * 1024
@@ -463,7 +475,237 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         }
     }
 
+    fun showGalleryDialog() {
+        var options: Array<String> = arrayOf("Select a Photo", "Select a Video")
+        var dialogBuilder: AlertDialog.Builder = AlertDialog.Builder(this)
 
+        dialogBuilder.setTitle("Select from the options given below")
+        dialogBuilder.setItems(options, DialogInterface.OnClickListener { dialog, item ->
+                    if (options[item].equals("Select a Photo")) {
+                        openImageChooser()
+                    } else if (options[item].equals("Select a Video")) {
+                        openVideoChooser()
+                    }
+                })
+        dialogBuilder.setNegativeButton(android.R.string.cancel, (DialogInterface.OnClickListener { dialog, which ->
+            dialog.cancel()
+        }))
+
+        var alertDialog: AlertDialog = dialogBuilder.create()
+        alertDialog.show()
+    }
+
+    fun showAlertDialogBox() {
+        val options: Array<String> = arrayOf("Take a Photo, Take a Video")
+        val alertDialogBuilder: AlertDialog.Builder = AlertDialog.Builder(this)
+
+        alertDialogBuilder.setTitle("Select from the options given below")
+        alertDialogBuilder.setItems(options, DialogInterface.OnClickListener { dialog, item ->
+            if (options[item].equals("Take a Photo")) {
+                takingPicture()
+
+                dialog.cancel()
+            } else if (options[item].equals("Take a Video")) {
+                makeVideo()
+
+                dialog.cancel()
+            }
+        })
+
+        alertDialogBuilder.setNegativeButton(android.R.string.cancel, DialogInterface.OnClickListener { dialog, which ->
+            dialog.cancel()
+        })
+
+        val alertDialog: AlertDialog = alertDialogBuilder.create()
+        alertDialog.show()
+    }
+
+    fun getFileSize (file: File): Long { return file.length() }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        var fileSize: Long
+
+        when (requestCode) {
+            REQUEST_IMAGE_CAPTURE ->
+                    if (resultCode == Activity.RESULT_OK) {
+                        showLock = true
+                        var date: String = SimpleDateFormat("yyyyMddHHMMSS", Locale.getDefault())
+                                .format(Date())
+                        var bundle: Bundle = data!!.extras
+                        var bitmap: Bitmap = bundle.get("data") as Bitmap
+
+                        var imageSavedFile: File = saveFileToStorage("IMG_" + date + ".png", bitmap)
+                        Log.d(TAG, "filepath: " + imageSavedFile)
+                        var uri: Uri
+
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            uri = FileProvider.getUriForFile(
+                                    this@HomeActivity,
+                                    applicationContext.packageName + ".provider",
+                                    imageSavedFile)
+                        } else {
+                            uri = Uri.fromFile(imageSavedFile)
+                        }
+
+                        showPhotoDialog(uri)
+                    }
+        }
+    }
+
+    fun showPhotoDialog(imageUri: Uri) {
+        var dialogBuilder: AlertDialog.Builder = AlertDialog.Builder(this, R.style.AppCompatAlertDialog)
+        var layoutInflater: LayoutInflater = this.layoutInflater
+        var viewGroup: ViewGroup = RelativeLayout(this@HomeActivity)
+        var dialogView: View = layoutInflater.inflate(R.layout.dialog_layout, viewGroup, false)
+        dialogBuilder.setView(dialogView)
+        dialogBuilder.setTitle("Upload Image")
+
+        var txtCaption: EditText = dialogView.findViewById(R.id.txtBoxCaption) as EditText
+        var photoImg: ImageView = dialogView.findViewById(R.id.imgPhoto) as ImageView
+
+        Glide.with(this)
+                .load(imageUri)
+                .into(photoImg)
+
+        val positive: String = getString(android.R.string.ok)
+        dialogBuilder.setPositiveButton(positive, DialogInterface.OnClickListener { dialog, which ->
+            strCaption = txtCaption.text.toString()
+            Log.d(TAG, "caption: " + strCaption)
+
+            uploadImageToFirebase(photoImg, strCaption)
+            dialog.cancel()
+        })
+
+        dialogBuilder.setNegativeButton(android.R.string.cancel, DialogInterface.OnClickListener { dialog, which ->
+            dialog.cancel()
+        })
+
+        val alertDialog: AlertDialog = dialogBuilder.create()
+        try {
+            alertDialog.window.setSoftInputMode(WindowManager.LayoutParams
+                    .SOFT_INPUT_ADJUST_RESIZE)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        alertDialog.show()
+    }
+
+    fun uploadImageToFirebase(photoImage: ImageView, caption: String) {
+        val timeStamp: String = SimpleDateFormat("yyyyMddHHMMSS", Locale.getDefault())
+                .format(Date())
+        var strCaption = caption
+
+        var imageStore: StorageReference = storageRef.child("IRecall")
+                .child("IMG_" + timeStamp + ".png")
+        photoImage.isDrawingCacheEnabled = true
+        photoImage.buildDrawingCache()
+
+        var bitmap: Bitmap = photoImage.drawingCache
+        val outputStream: ByteArrayOutputStream = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+        val data: ByteArray = outputStream.toByteArray()
+
+        val uploadTask: UploadTask = imageStore.putBytes(data)
+        uploadTask.addOnFailureListener { this@HomeActivity; object: OnFailureListener {
+            override fun onFailure(e: java.lang.Exception) {
+                e.printStackTrace()
+            }
+        }}.addOnSuccessListener { this@HomeActivity; object: OnSuccessListener<UploadTask.TaskSnapshot> {
+            override fun onSuccess(taskSnapshot: UploadTask.TaskSnapshot?) {
+                Toast.makeText(this@HomeActivity,
+                        "Upload successfully done",
+                        Toast.LENGTH_SHORT).show()
+                var date: String = SimpleDateFormat("yyyyMddHHMMSS", Locale.getDefault())
+                        .format(Date())
+                addDbValues("IMG_" + timeStamp + ".png", strCaption,
+                        latitudeAlbum.toDouble(),
+                        longitudeAlbum.toDouble(), "I", date,
+                        "", "IMAGE")
+                downloadUri = taskSnapshot?.downloadUrl!!
+                Log.d(TAG, "Uri: " + downloadUri)
+            }
+        }}
+    }
+
+    fun addDbValues(filename: String, caption: String, latitude: Double,
+                    longitude: Double, mediaIdentify: String, date: String,
+                    thumbnailName: String, mediaType: String) {
+        var random: Random = Random()
+        Log.d(TAG, "AlbumId: " + albumId)
+        Log.d(TAG, "lat: " + latitude + " long: " + longitude)
+
+        var map: MutableMap<String, String> = HashMap()
+        if (albumId.equals("")) {
+            map.put("AlbumId", (random.nextInt(1081) + 20).toString())
+        } else {
+            map.put("AlbumId", albumId)
+        }
+
+        map.put("MediaId", mediaIdentify+"_"+(random.nextInt(1081) + 20).toString())
+        map.put("Filename", filename)
+        map.put("caption", caption)
+        map.put("Latitude", latitude.toString())
+        map.put("Longitude", longitude.toString())
+        map.put("Date", date)
+        map.put("Thumbnail", thumbnailName)
+        map.put("MediaType", mediaType)
+
+        firebase.push().setValue(map)
+    }
+
+    fun loadLatLong() {
+        albumId = ""
+        latitudeAlbum = latitude.toString()
+        longitudeAlbum = longitude.toString()
+
+        firebase.addChildEventListener( object: ChildEventListener {
+            override fun onChildAdded(dataSnapshot: DataSnapshot?, s: String?) {
+                var map: Map<*,*>? = dataSnapshot?.getValue(Map::class.java)
+                newStr = Array(size = map?.size!!) { "" }
+
+            }
+
+            override fun onChildMoved(p0: DataSnapshot?, p1: String?) {
+
+            }
+
+            override fun onCancelled(p0: FirebaseError?) {
+
+            }
+
+            override fun onChildChanged(p0: DataSnapshot?, p1: String?) {
+
+            }
+
+            override fun onChildRemoved(p0: DataSnapshot?) {
+
+            }
+        })
+    }
+
+    fun saveFileToStorage(fileName: String, bitmap: Bitmap): File {
+        var sdcard: String = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES).toString() +
+                File.separator + "IRecall_Images"
+
+        var filePath: File = File(sdcard, fileName)
+        var stream: FileOutputStream
+
+        try {
+            stream = FileOutputStream(filePath)
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            stream.flush()
+            stream.close()
+
+            MediaStore.Images.Media.insertImage(contentResolver,
+                    bitmap, filePath.path, fileName)
+            Log.d(TAG, "File successfully saved")
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        return filePath
+    }
 
     fun getOutputMediaFileUri(type: Int): Uri {
         var getOutputFunction: Uri

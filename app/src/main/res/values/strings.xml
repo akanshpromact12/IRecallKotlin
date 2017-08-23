@@ -8,6 +8,8 @@
 
     <string name="nav_logout">Logout</string>
 
+    <string name="hint">Enter a caption</string>
+
     <!-- activity_main.xml -->
     <string name="welcome_message">Recall all your sweet memories, in the form of a collection of the best of photos</string>
     <string name="img_content_desc">Front Page Logo</string>
