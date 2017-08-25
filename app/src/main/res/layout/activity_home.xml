@@ -27,4 +27,13 @@
             app:headerLayout="@layout/nav_header_main"
             app:menu="@menu/activity_main_drawer" />
     </android.support.v4.widget.DrawerLayout>
+
+    <TextView
+        android:id="@+id/txtView1"
+        android:layout_below="@+id/drawer_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/welcome_msg_home"
+        android:paddingTop="100dp"
+        android:textSize="24sp" />
 </RelativeLayout>

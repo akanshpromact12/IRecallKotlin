@@ -5,7 +5,6 @@ import android.app.AlertDialog
 import android.content.*
 import android.database.Cursor
 import android.graphics.Bitmap
-import android.location.Address
 import android.location.Geocoder
 import android.location.Location
 import android.media.ThumbnailUtils
@@ -30,6 +29,7 @@ import com.bumptech.glide.Glide
 import com.bumptech.glide.load.resource.drawable.GlideDrawable
 import com.bumptech.glide.request.RequestListener
 import com.bumptech.glide.request.target.Target
+import com.crashlytics.android.Crashlytics
 import com.firebase.client.*
 import com.github.clans.fab.FloatingActionButton
 import com.github.clans.fab.FloatingActionMenu
@@ -47,10 +47,13 @@ import com.google.android.gms.tasks.OnFailureListener
 import com.google.android.gms.tasks.OnSuccessListener
 import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.crash.FirebaseCrash
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.StorageReference
 import com.google.firebase.storage.UploadTask
+import com.logentries.logger.AndroidLogger
 import de.hdodenhof.circleimageview.CircleImageView
+import io.fabric.sdk.android.Fabric
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -94,7 +97,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
     lateinit var albumDetails: AlbumDetails
     lateinit var arrayList: List<AlbumDetails>
     val revList: MutableList<AlbumDetails> = ArrayList(initialCapacity = 0)
-    lateinit var revMap: MutableMap<String, ArrayList<AlbumDetails>>
+    var revMap: MutableMap<String, ArrayList<AlbumDetails>> = HashMap()
     lateinit var marker: Marker
     var childrenCount: Long = 0
     var showLock: Boolean = false
@@ -103,16 +106,27 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
     lateinit var folderNameFirebase: String
     lateinit var coverPic: String
     lateinit var sharedPrefs: saveSharedPrefs
+    lateinit var logger: AndroidLogger
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_home)
 
+        Fabric.with(this, Crashlytics())
+        try {
+            logger = com.logentries.logger.AndroidLogger.createInstance(applicationContext,
+                    false, false, false, null, 0,
+                    "b7c7c9d7-853b-483a-bb6d-375e727c2ec9", true)
+        } catch (ex: Exception) {
+            ex.printStackTrace()
+            Crashlytics.logException(ex)
+        }
+
         val mapFragment: SupportMapFragment = supportFragmentManager
                 .findFragmentById(R.id.googleMap) as SupportMapFragment
         mapFragment.getMapAsync(this)
         auth = FirebaseAuth.getInstance()
-        arrayList = arrayListOf(albumDetails)
+        sharedPrefs = saveSharedPrefs()
 
         storageRef = FirebaseStorage.getInstance().reference
         val options: GoogleSignInOptions = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
@@ -131,7 +145,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
 
         firebaseAnalytics = FirebaseAnalytics.getInstance(this)
 
-        val txt: TextView = findViewById(R.id.textView) as TextView
+        val txt: TextView = findViewById(R.id.txtView1) as TextView
         getLocation()
         val userId: String
 
@@ -149,14 +163,18 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         }
 
         Log.d(TAG, "userid: $userId")
+        logger.log("UserId: $userId")
+        Toast.makeText(applicationContext, "userId: $userId", Toast.LENGTH_SHORT).show()
 
         Firebase.setAndroidContext(applicationContext)
         firebase = Firebase("https://irecall-kotlin.firebaseio.com/$userId")
         Log.d(TAG, "firebase db: https://irecall-kotlin.firebaseio.com/$userId")
+        logger.log("firebase db: https://irecall-kotlin.firebaseio.com/$userId")
 
         loadLatLong()
 
-        Log.d(TAG, "id:: " + albumId)
+        Log.d(TAG, "id:: $albumId")
+        logger.log("id:: $albumId")
 
         val nav: NavigationView = findViewById(R.id.nav_view) as NavigationView
         nav.itemIconTintList = null
@@ -177,11 +195,11 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         val toolbar: Toolbar = findViewById(R.id.toolbar) as Toolbar
         setSupportActionBar(toolbar)
 
-        floatingActionCamera.setOnClickListener { View.OnClickListener {
+        floatingActionCamera.setOnClickListener {
             showAlertDialogBox()
 
             floatingActionMenu.close(true)
-        }}
+        }
 
         floatingActionGallery.setOnClickListener { View.OnClickListener {
             showGalleryDialog()
@@ -204,6 +222,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
             true
         }
         nav.setNavigationItemSelectedListener(this)
+        FirebaseCrash.log("My First Kotlin App")
     }
 
     fun getLocation() {
@@ -214,8 +233,11 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
             longitude = gps.getLongitude()
 
             Log.d(TAG, "Your current location is: " +
-                    "\nLatitude: " + latitude + "" +
-                    "\nLongitude: " + longitude)
+                    "\nLatitude: $latitude" +
+                    "\nLongitude: $longitude")
+            logger.log("Your current location is: " +
+                    "\nLatitude: $latitude" +
+                    "\nLongitude: $longitude")
         } else {
             gps.showSettingsAlert()
         }
@@ -243,8 +265,10 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
 
         if (success) {
             Log.d(TAG, "Folder Property: Folder created successfully")
+            logger.log("Folder Property: Folder created successfully")
         } else {
             Log.d(TAG, "Folder Property: Folder creation unsuccessful")
+            logger.log("Folder Property: Folder creation unsuccessful")
         }
     }
 
@@ -275,50 +299,62 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                 firebase.runTransaction(handler)
                 albumDetails = dataSnapshot?.getValue(AlbumDetails::class.java)!!
                 Log.d(TAG, "strLength: " + childrenCount)
+                logger.log("strLength: " + childrenCount)
 
                 arrayList = arrayListOf(albumDetails)
-                Log.d(TAG, "arrlist size: " + arrayList.size)
+                Log.d(TAG, "arrlist size: ${arrayList.size}, " +
+                        "arr: ${arrayList[0]}")
+                logger.log("arrlist size: ${arrayList.size}")
 
-                revMap.put(albumDetails.AlbumId, arrayListOf(AlbumDetails()))
+                revMap.put(albumDetails.AlbumId, java.util.ArrayList<AlbumDetails>())
                 if (arrayList.size==childrenCount.toInt()) {
                     if (revList.isNotEmpty()) {
                         revList.clear()
                     }
-                    for (i in 0..(revList.size-1) step 1) {
-                        Log.d(TAG, "revList size before adding element: " + revList.size)
+                    for (i in arrayList.indices.reversed()) {
+                        Log.d(TAG, "revList size before addition" + revList.size)
                         revList.add(arrayList[i])
-                        Log.d(TAG, "revList size after adding element: " + revList.size)
+                        Log.d(TAG, "revList size after addition " + revList.size + " i:" + i)
                     }
 
                     Log.d(TAG, "revList size: "+revList.size+" values: "+ revList[0].caption)
+                    logger.log("revList size: "+revList.size+" values: "+ revList[0].caption)
 
                     for (key: String in revMap.keys) {
-                        for (i in 0..(revList.size-1) step 1) {
-                            val album: AlbumDetails = revList[i]
+                        for (i in revList.indices) {
+                            val album = revList[i]
                             if (key == album.AlbumId) {
-                                val imageListofAlbum: ArrayList<AlbumDetails> = revMap[key]!!
-                                imageListofAlbum.add(album)
-                                revMap.put(key, imageListofAlbum)
+                                val imagesListOfAlbum = revMap[key]
+                                Log.d(TAG, "listOfImages size: ${imagesListOfAlbum?.size}")
+                                imagesListOfAlbum?.add(album)
+                                Log.d(TAG, "listOfImages size-after: ${imagesListOfAlbum?.size}")
+                                revMap.put(key, imagesListOfAlbum!!)
+                                Log.d(TAG, "caption - key: " + revMap[key]?.get(0)?.caption)
                             }
                         }
                     }
                     val set: Set<String> = revMap.keys
 
                     Log.d(TAG, "Children size: " + childrenCount)
+                    logger.log("Children size: " + childrenCount)
                     for (s2: String in set) {
                         Log.d(TAG, "Key-> " + s2)
+                        logger.log("Key-> " + s2)
 
                         val str: ArrayList<AlbumDetails> = revMap[s2]!!
-                        for (i in 0..(str.size-1) step 1) {
-                            Log.d(TAG, "Values->" + str[i].caption)
+                        for (i in str.indices) {
+                            Log.d(TAG, "Values ----- " + str[i].caption)
+                            logger.log("Values ----- " + str[i].caption)
                         }
                         val str1: String = str[0].caption
                         Log.d(TAG, "Caption Map: " + str1)
+                        logger.log("Caption Map: " + str1)
 
                         //Map Start
                         val latLng: LatLng = LatLng(str[0].Latitude.toDouble(),
                                 str[0].Longitude.toDouble())
                         Log.d(TAG, "LatLng: " + latLng)
+                        logger.log("LatLng: " + latLng)
 
                         if (str[0].MediaType == "IMAGE") {
                             folderNameFirebase = "IRecall"
@@ -329,26 +365,26 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                         }
 
                         Log.d(TAG, "arrlist size: " + str.size)
-                        Log.d(TAG, "str-caption: " + str[0].caption)
+                        logger.log("str-caption: " + str[0].caption)
 
                         marker = googleMap.addMarker(MarkerOptions()
                                 .position(latLng).title(str1 + "~" + s2 + "~" + str[0].MediaId)
-                                .snippet("https://firebasestorage.googleapis.com/v0/b/irecall-kotlin.firebaseio.com/o/$folderNameFirebase%2F$coverPic?alt=media&token=1"))
+                                .snippet("https://firebasestorage.googleapis.com/v0/b/irecall-kotlin.appspot.com/o/$folderNameFirebase%2F$coverPic?alt=media&token=1"))
 
-                        val fireUrl: String = "https://firebasestorage.googleapis.com/v0/b/irecall-kotlin.firebaseio.com/o/$folderNameFirebase%2F$coverPic?alt=media&token=1"
+                        val fireUrl: String = "https://firebasestorage.googleapis.com/v0/b/irecall-kotlin.appspot.com/o/$folderNameFirebase%2F$coverPic?alt=media&token=1"
 
                         googleMap.setInfoWindowAdapter(object: GoogleMap.InfoWindowAdapter {
-                            override fun getInfoWindow(marker: Marker?): View {
-                                throw Exception()
+                            override fun getInfoWindow(marker: Marker?): View? {
+                                return null
                             }
 
                             override fun getInfoContents(marker: Marker?): View {
                                 val view: View = layoutInflater.inflate(
                                         R.layout.map_layout, null)
 
-                                val imageView: ImageView = findViewById(R.id.imgPhotoMap) as ImageView
-                                val play: ImageView = findViewById(R.id.playHomeAct) as ImageView
-                                val title: TextView = findViewById(R.id.titleMarker) as TextView
+                                val imageView: ImageView = view.findViewById(R.id.imgPhotoMap) as ImageView
+                                val play: ImageView = view.findViewById(R.id.playHomeAct) as ImageView
+                                val title: TextView = view.findViewById(R.id.titleMarker) as TextView
 
                                 if (str[0].MediaType == "IMAGE") {
                                     play.visibility = View.GONE
@@ -359,8 +395,10 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
 
                                 try {
                                     Log.d(TAG, "title: " + marker?.title!!.split("~")[0])
+                                    logger.log("title: " + marker.title!!.split("~")[0])
                                     title.text = str1
                                     Log.d(TAG, "Resources: " + marker.snippet.split("~")[0])
+                                    logger.log("Resources: " + marker.snippet.split("~")[0])
 
                                     Glide.with(applicationContext)
                                             .load(fireUrl)
@@ -382,47 +420,49 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                                             .into(imageView)
                                 } catch (ex: Exception) {
                                     ex.printStackTrace()
+                                    FirebaseCrash.report(ex)
                                 }
 
                                 return view
                             }
                         })
 
-                        googleMap.setOnInfoWindowClickListener {
-                            GoogleMap.OnInfoWindowClickListener { marker ->
-                                val geoCoder: Geocoder = Geocoder(this@HomeActivity,
-                                        Locale.getDefault())
-                                var addr: String = ""
-                                try {
-                                    val addresses: List<Address> = geoCoder.getFromLocation(marker?.position!!.latitude,
-                                            marker.position!!.longitude, 1)
-                                    val objAddr: Address = addresses[0]
-                                    addr = objAddr.locality
-                                } catch (ex: Exception) {
-                                    ex.stackTrace
-                                }
-
-                                val key: String = marker?.title!!.split("~")[1]
-                                val alist: ArrayList<AlbumDetails> = revMap[key] as ArrayList<AlbumDetails>
-
-                                val intentAlbumsPage: Intent = Intent(applicationContext, ViewPostsActivity::class.java)
-                                intentAlbumsPage.putExtra("listOfImages", alist)
-                                intentAlbumsPage.putExtra("name", name)
-                                intentAlbumsPage.putExtra("email", email)
-                                intentAlbumsPage.putExtra("photoUri", photoUri)
-                                intentAlbumsPage.putExtra("lat", addr)
-                                marker.hideInfoWindow()
-
-                                startActivity(intentAlbumsPage)
+                        googleMap.setOnInfoWindowClickListener { marker ->
+                            val geocoder = Geocoder(this@HomeActivity,
+                                    Locale.getDefault())
+                            var addr = ""
+                            try {
+                                val addresses = geocoder.getFromLocation(marker.position.latitude,
+                                        marker.position.longitude, 1)
+                                val objAddr = addresses[0]
+                                addr = objAddr.locality
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                FirebaseCrash.log(e.toString())
                             }
+
+                            val key = marker.title.split("~".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()[1]
+                            val alist = revMap[key]
+
+                            val intentAlbumsPage = Intent(applicationContext, ViewPostsActivity::class.java)
+                            intentAlbumsPage.putExtra("listOfImages", alist)
+                            intentAlbumsPage.putExtra("name", name)
+                            intentAlbumsPage.putExtra("email", email)
+                            intentAlbumsPage.putExtra("photoUri", photoUri)
+                            intentAlbumsPage.putExtra("lat", addr)
+                            marker.hideInfoWindow()
+
+                            startActivity(intentAlbumsPage)
                         }
                     }
                     Log.d(TAG, "revMap size: " + revMap.size)
+                    logger.log("revMap size: " + revMap.size)
 
                     val lat1: Double = latitude
                     val long1: Double = longitude
                     val currLatLng: LatLng = LatLng(lat1, long1)
                     Log.d(TAG, "Filename: " + albumDetails.Filename)
+                    logger.log("Filename: " + albumDetails.Filename)
 
                     trueCount = 0
                     count = 0
@@ -440,6 +480,13 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                             "\nlatitude: " + lat_load +
                             "\nlongitude: " + long_load)
                     Log.d(TAG, "Map Ready")
+                    logger.log("\nValues fetched are: " +
+                            "\nAlbumId: " + albumId +
+                            "\nMediaId: " + mediaId +
+                            "\nFilename: " + filename +
+                            "\nlatitude: " + lat_load +
+                            "\nlongitude: " + long_load)
+                    logger.log("Map Ready")
 
                     googleMap.moveCamera(CameraUpdateFactory.newLatLng(currLatLng))
                 }
@@ -509,18 +556,23 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
 
         Log.d(TAG, "Location: \nLatitude: " + latitude +
                 "\nLongitude: " + longitude)
+        logger.log("Location: \nLatitude: " + latitude +
+                "\nLongitude: " + longitude)
     }
 
     override fun onProviderDisabled(provider: String?) {
         Log.d(TAG, "disabled")
+        logger.log("disabled")
     }
 
     override fun onProviderEnabled(provider: String?) {
         Log.d(TAG, "enabled")
+        logger.log("enabled")
     }
 
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {
         Log.d(TAG, "status" + status)
+        logger.log("status" + status)
     }
 
     fun takingPicture() {
@@ -563,7 +615,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
     }
 
     fun showAlertDialogBox() {
-        val options: Array<String> = arrayOf("Take a Photo, Take a Video")
+        val options = arrayOf<CharSequence>("Take a Photo", "Make a Video")
         val alertDialogBuilder: AlertDialog.Builder = AlertDialog.Builder(this)
 
         alertDialogBuilder.setTitle("Select from the options given below")
@@ -603,6 +655,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
 
                         val imageSavedFile: File = saveFileToStorage("IMG_$date.png", bitmap)
                         Log.d(TAG, "filepath: " + imageSavedFile)
+                        logger.log("filepath: " + imageSavedFile)
                         val uri: Uri
 
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -639,6 +692,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                             pathImgGallery = getPath(this@HomeActivity, selectedImageUri)!!
                         } catch (e: Exception) {
                             e.printStackTrace()
+                            FirebaseCrash.report(e)
                         }
 
                         showSelectedImageDialog(selectedImageUri)
@@ -652,6 +706,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                         pathVideoGallery = getPath(this@HomeActivity, selectedVideoUri)!!
                     } catch (ex: Exception) {
                         ex.printStackTrace()
+                        FirebaseCrash.report(ex)
                     }
 
                     showSelectedVideoDialog()
@@ -678,6 +733,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         dialogBuilder.setPositiveButton(positive, { dialog, _ ->
             strCaption = txtCaption.text.toString()
             Log.d(TAG, "caption: " + strCaption)
+            logger.log("caption: " + strCaption)
 
             uploadImageToFirebase(photoImg, strCaption)
             dialog.cancel()
@@ -693,6 +749,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                     .SOFT_INPUT_ADJUST_RESIZE)
         } catch (e: Exception) {
             e.printStackTrace()
+            FirebaseCrash.report(e)
         }
 
         alertDialog.show()
@@ -798,6 +855,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         val videoView: ImageView = dialogView.findViewById(R.id.imgPhoto) as ImageView
 
         Log.d(TAG, "File name: $fileName")
+        logger.log("File name: $fileName")
 
         val thumbnail: Bitmap = ThumbnailUtils.createVideoThumbnail(fileName, MediaStore.Images.Thumbnails.MINI_KIND)
         videoView.setImageBitmap(thumbnail)
@@ -805,10 +863,12 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         dialogBuilder.setPositiveButton(android.R.string.ok, { _, _ ->
             strCaption = txtCaption.text.toString()
             Log.d(TAG, "Caption: $strCaption")
+            logger.log("Caption: $strCaption")
 
             val sdcard: File = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
                     VIDEO_DIR_NAME)
             Log.d(TAG, "Files: $fileName")
+            logger.log("Files: $fileName")
 
             if (sdcard.exists()) {
                 val fileList: Array<File> = sdcard.listFiles()
@@ -816,6 +876,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                 for (file: File in fileList) {
                     if (file.toString() == fileName) {
                         Log.d(TAG, "files: " + file.toString())
+                        logger.log("files: " + file.toString())
 
                         uploadVideoToFirebase(file, strCaption)
                     }
@@ -833,6 +894,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                     .SOFT_INPUT_ADJUST_RESIZE)
         } catch (e: Exception) {
             e.printStackTrace()
+            FirebaseCrash.report(e)
         }
 
         alertDialog.show()
@@ -876,12 +938,14 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
 
         videoUpload.addOnFailureListener { OnFailureListener {
             Log.d(TAG, "Something went wrong while uploading the video")
+            logger.log("Something went wrong while uploading the video")
         }}.addOnSuccessListener { OnSuccessListener<UploadTask.TaskSnapshot> {
             val date: String = SimpleDateFormat("yyyyMddHHMMSS", Locale.getDefault())
                     .format(Date())
             val thumbUpload: UploadTask = thumbRef.putFile(thumbnailUri)
             thumbUpload.addOnSuccessListener { OnSuccessListener<UploadTask.TaskSnapshot> {
                 Log.d(TAG, "Name of thumbnail: $thumbnailName")
+                logger.log("Name of thumbnail: $thumbnailName")
                 addDbValues(fileVideo.lastPathSegment, strCaption,
                         latitudeAlbum.toDouble(),
                         longitudeAlbum.toDouble(),
@@ -890,6 +954,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                         Toast.LENGTH_SHORT).show()
             }}.addOnFailureListener { OnFailureListener {
                 Log.d(TAG, "Error while uploading the video")
+                logger.log("Error while uploading the video")
             }}
         }}
     }
@@ -902,6 +967,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
             file.delete()
             file = File(sdcard, filename)
             Log.d(TAG, "File exists: $file, Bitmap= $filename")
+            logger.log("File exists: $file, Bitmap= $filename")
         }
 
         file = File(sdcard, filename)
@@ -912,9 +978,11 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
             stream.close()
         } catch (e: Exception) {
             e.printStackTrace()
+            FirebaseCrash.report(e)
         }
 
         Log.d(TAG, "File: $file")
+        logger.log("File: $file")
         thumbnailName = filename
 
         return file
@@ -936,6 +1004,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         dialogBuilder.setPositiveButton(android.R.string.ok, { _, _ ->
             strCaption = txtCaption.text.toString()
             Log.d(TAG, "Caption: $strCaption")
+            logger.log("Caption: $strCaption")
 
             uploadGalleryImageToFirebase(pathImgGallery, strCaption)
 
@@ -953,6 +1022,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                     .SOFT_INPUT_ADJUST_RESIZE)
         } catch (e: Exception) {
             e.printStackTrace()
+            FirebaseCrash.report(e)
         }
 
         alertDialog.show()
@@ -977,6 +1047,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
 
         galleryImgUpload.addOnFailureListener { OnFailureListener {
             Log.d(TAG, "Something went wrong while uploading the image")
+            logger.log("Something went wrong while uploading the image")
         }}.addOnSuccessListener { OnSuccessListener<UploadTask.TaskSnapshot> {
             addDbValues(filenm, caption,
                     latitudeAlbum.toDouble(),
@@ -1006,6 +1077,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         dialogBuidler.setPositiveButton(android.R.string.ok, { _, _ ->
             strCaption = txtCaption.text.toString()
             Log.d(TAG, "Caption: $strCaption")
+            logger.log("Caption: $strCaption")
 
             uploadGalleryVideoToFirebase(pathVideoGallery, strCaption)
 
@@ -1023,6 +1095,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                     .SOFT_INPUT_ADJUST_RESIZE)
         } catch (e: Exception) {
             e.printStackTrace()
+            FirebaseCrash.report(e)
         }
 
         alertDialog.show()
@@ -1067,6 +1140,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                 .format(Date())
         galleryImgUpload.addOnFailureListener { OnFailureListener {
             Log.d(TAG, "Error while uploading the image from gallery")
+            logger.log("Error while uploading the image from gallery")
         }}.addOnSuccessListener { OnSuccessListener<UploadTask.TaskSnapshot> {
             val thumbUpload: UploadTask = thumbRef.putFile(thumbnailUri)
             thumbUpload.addOnSuccessListener { OnSuccessListener<UploadTask.TaskSnapshot> {
@@ -1081,49 +1155,54 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                 revMap.clear()
             }}.addOnFailureListener { OnFailureListener {
                 Log.d(TAG, "Error while uploading thumbnail")
+                logger.log("Error while uploading thumbnail")
             }}
         }}
     }
 
-    fun uploadImageToFirebase(photoImage: ImageView, caption: String) {
-        val timeStamp: String = SimpleDateFormat("yyyyMddHHMMSS", Locale.getDefault())
-                .format(Date())
-        val strCaption = caption
+    fun uploadImageToFirebase(photoImg: ImageView, caption: String) {
+        val timestamp: String = SimpleDateFormat("yyyyMMddHHmmss", Locale.getDefault())
+        .format(Date())
+        val strCapt: String = caption
 
-        val imageStore: StorageReference = storageRef.child("IRecall")
-                .child("IMG_$timeStamp.png")
-        photoImage.isDrawingCacheEnabled = true
-        photoImage.buildDrawingCache()
+        val imageStorage: StorageReference = storageRef.child("IRecall")
+                .child("IMG_$timestamp.png")
+        photoImg.isDrawingCacheEnabled = true
+        photoImg.buildDrawingCache()
 
-        val bitmap: Bitmap = photoImage.drawingCache
-        val outputStream: ByteArrayOutputStream = ByteArrayOutputStream()
+        val bitmap: Bitmap = photoImg.drawingCache
+        val outputStream: ByteArrayOutputStream =ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
         val data: ByteArray = outputStream.toByteArray()
 
-        val uploadTask: UploadTask = imageStore.putBytes(data)
-        uploadTask.addOnFailureListener { OnFailureListener { e -> e.printStackTrace() } }.addOnSuccessListener {
-            OnSuccessListener<UploadTask.TaskSnapshot> { taskSnapshot ->
-                Toast.makeText(this@HomeActivity,
-                        "Upload successfully done",
-                        Toast.LENGTH_SHORT).show()
-                val date: String = SimpleDateFormat("yyyyMddHHMMSS", Locale.getDefault())
-                        .format(Date())
-                addDbValues("IMG_$timeStamp.png", strCaption,
-                        latitudeAlbum.toDouble(),
-                        longitudeAlbum.toDouble(), "I", date,
-                        "", "IMAGE")
-                downloadUri = taskSnapshot?.downloadUrl!!
-                Log.d(TAG, "Uri: " + downloadUri)
-            }
-        }
+        val uploadTask: UploadTask = imageStorage.putBytes(data)
+        uploadTask.addOnFailureListener(this@HomeActivity, {
+            Toast.makeText(this@HomeActivity,
+                    "Upload was unsuccessful",
+                    Toast.LENGTH_SHORT).show()
+        }).addOnSuccessListener(this@HomeActivity, { taskSnapshot ->
+            Toast.makeText(this@HomeActivity,
+                    "Upload was successful",
+                    Toast.LENGTH_SHORT).show()
+            val date: String = SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.getDefault())
+                    .format(Date())
+            addDbValues("IMG_$timestamp.png", strCapt,
+                    latitudeAlbum.toDouble(),
+                    longitudeAlbum.toDouble(), "I", date, "", "IMAGE")
+            downloadUri = taskSnapshot?.downloadUrl!!
+            Log.d(TAG, "Uri: " + downloadUri)
+            logger.log("Uri: " + downloadUri)
+        })
     }
 
     fun addDbValues(filename: String, caption: String, latitude: Double,
                     longitude: Double, mediaIdentify: String, date: String,
                     thumbnailName: String, mediaType: String) {
         val random: Random = Random()
-        Log.d(TAG, "AlbumId: " + albumId)
+        Log.d(TAG, "AlbumId: $albumId")
         Log.d(TAG, "lat: $latitude, long: $longitude")
+        logger.log("AlbumId: $albumId")
+        logger.log("lat: $latitude, long: $longitude")
 
         val map: MutableMap<String, String> = HashMap()
         if (albumId == "") {
@@ -1159,6 +1238,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                 val longi: Double = map["Longitude"].toString().toDouble()
 
                 Log.d(TAG, "Values: Latitude is $lat, longitude is $longi")
+                logger.log("Values: Latitude is $lat, longitude is $longi")
                 val album: String = calcDistance(latitudeAlbum.toDouble(),
                         longitudeAlbum.toDouble(), lat, longi)
                 val random: Random = Random()
@@ -1168,6 +1248,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                     if (album == "same") {
                         albumId = map["AlbumId"].toString()
                         Log.d(TAG, "Albumid: $albumId")
+                        logger.log("Albumid: $albumId")
                         latitudeAlbum = map["Latitude"].toString()
                         longitudeAlbum = map["Longitude"].toString()
                     } else {
@@ -1182,6 +1263,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                 }
 
                 Log.d(TAG, "lat: $latitudeAlbum, longi: $longitudeAlbum")
+                logger.log("lat: $latitudeAlbum, longi: $longitudeAlbum")
             }
 
             override fun onChildMoved(p0: DataSnapshot?, p1: String?) {
@@ -1202,6 +1284,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         })
 
         Log.d(TAG, "albumid: $albumId")
+        logger.log("albumid: $albumId")
     }
 
     fun calcDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): String {
@@ -1216,6 +1299,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         dist *= 1.609344
 
         Log.d(TAG, "Distance: $dist")
+        logger.log("Distance: $dist")
 
         val albumid: String
         if (dist < 1) {
@@ -1247,8 +1331,10 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
             MediaStore.Images.Media.insertImage(contentResolver,
                     bitmap, filePath.path, fileName)
             Log.d(TAG, "File successfully saved")
+            logger.log("File successfully saved")
         } catch (e: Exception) {
             e.printStackTrace()
+            FirebaseCrash.report(e)
         }
 
         return filePath
@@ -1276,6 +1362,7 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         if (!sdcard.exists()) {
             if (!sdcard.mkdirs()) {
                 Log.d(TAG, VIDEO_DIR_NAME + "something went wrong while creating the file")
+                logger.log(VIDEO_DIR_NAME + "something went wrong while creating the file")
             }
         }
 
@@ -1324,20 +1411,24 @@ class HomeActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
 
                     override fun onFailure(status: Status) {
                         Log.d(TAG, "Logout Unsuccessful")
+                        logger.log("Logout Unsuccessful")
                     }
                 }}
     }
 
     override fun onConnected(p0: Bundle?) {
         Log.d(TAG, "Connected")
+        logger.log("Connected")
     }
 
     override fun onConnectionSuspended(p0: Int) {
         Log.d(TAG, "Connection Suspended")
+        logger.log("Connection Suspended")
     }
 
     override fun onConnectionFailed(p0: ConnectionResult) {
         Toast.makeText(this@HomeActivity, "Connection unsuccessful", Toast.LENGTH_SHORT).show()
         Log.d(TAG, "Connection unsuccessful")
+        logger.log("Connection unsuccessful")
     }
 }
